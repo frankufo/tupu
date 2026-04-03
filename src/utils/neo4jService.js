@@ -10,7 +10,9 @@ const driver = neo4j.driver(
 );
 
 export async function runCypher(cypher, params = {}) {
-  const session = driver.session();
+  const session = driver.session({
+  database: 'base11'
+});
   try {
     return await session.run(cypher, params);
   } finally {

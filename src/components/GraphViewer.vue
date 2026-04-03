@@ -256,7 +256,7 @@ export default {
         "bolt://localhost:7687",
         neo4j.auth.basic("neo4j", "password")
       );
-      const session = driver.session();
+      const session = driver.session({database: 'base11'});
 
       try {
         const query = `
@@ -286,7 +286,7 @@ export default {
         "bolt://localhost:7687",
         neo4j.auth.basic("neo4j", "password")
       );
-      const session = driver.session();
+      const session = driver.session({database: 'base11'});
 
       try {
         const updates = [];
@@ -331,7 +331,7 @@ export default {
         "bolt://localhost:7687",
         neo4j.auth.basic("neo4j", "password")
       );
-      const session = driver.session();
+      const session = driver.session({database: 'base11'});
 
       try {
         const result = await session.run(`
@@ -368,7 +368,17 @@ export default {
       }
       if (this.selectedSystem === 'ALL') {
         return `
-          MATCH p=()-[]->() RETURN p;
+          MATCH (s:系统名称)
+          CALL apoc.path.subgraphAll(
+            s,
+            {
+              relationshipFilter: "包含>",
+              maxLevel: 3
+            }
+          )
+          YIELD nodes, relationships
+          RETURN DISTINCT nodes, relationships
+          LIMIT 500
 
         `;
       } 

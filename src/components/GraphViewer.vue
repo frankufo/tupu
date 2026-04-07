@@ -402,6 +402,7 @@ export default {
       };
       const config = {
         containerId: "viz",
+        serverDatabase: "base11",
         neo4j: {
           driverConfig: {
             encrypted: "ENCRYPTION_OFF"
@@ -409,6 +410,7 @@ export default {
           serverUrl: "bolt://localhost:7687",
           serverUser: "neo4j",
           serverPassword: "password"
+          
         },
         labels: {
           系统名称: {

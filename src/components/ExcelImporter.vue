@@ -96,6 +96,12 @@ export default {
     };
   },
   methods: {
+    normalizeString(value) {
+      if (value === null || value === undefined) {
+        return '';
+      }
+      return String(value).trim();
+    },
     splitFields(fieldValue) {
       if (!fieldValue || !fieldValue.toString().trim()) {
         return [];
@@ -123,10 +129,36 @@ export default {
       reader.readAsBinaryString(file);
     },
     parseRows(rawRows) {
+      const stringifyFields = new Set([
+        'sceneName',
+        'sceneOrder',
+        'initiatorSystemName',
+        'initiatorTransactionName',
+        'initiatorTransactionCode',
+        'initiatorRuleName',
+        'initiatorRuleContent',
+        'interfaceName',
+        'interfaceInputFieldName',
+        'interfaceOutputFieldName',
+        'calleeSystemName',
+        'calleeTransactionName',
+        'calleeTransactionCode',
+        'calleeRuleName',
+        'calleeRuleContent',
+        'calleeInterfaceName',
+        'calleeOrder',
+        'callCondition',
+        'calleeInputFieldName',
+        'calleeOutputFieldName'
+      ]);
+
       return rawRows.map(row => {
         const parsed = {};
         fieldKeys.forEach((key, index) => {
-          parsed[key] = row[excelHeaders[index]] || '';
+          const rawValue = row[excelHeaders[index]];
+          parsed[key] = stringifyFields.has(key)
+            ? this.normalizeString(rawValue)
+            : (rawValue || '');
         });
         return parsed;
       });
@@ -143,41 +175,91 @@ export default {
       }
       return 'black';
     },
+    normalizeValue(value) {
+      if (value === null || value === undefined) {
+        return '';
+      }
+      return value.toString().trim();
+    },
+    buildConflictEntity(row, rowIndex, side) {
+      if (side === 'initiator') {
+        return {
+          rowIndex,
+          rowNumber: rowIndex + 2,
+          side: '调用方',
+          transactionName: this.normalizeValue(row.initiatorTransactionName),
+          transactionCode: this.normalizeValue(row.initiatorTransactionCode),
+          interfaceName: this.normalizeValue(row.interfaceName)
+        };
+      }
+      return {
+        rowIndex,
+        rowNumber: rowIndex + 2,
+        side: '被调用方',
+        transactionName: this.normalizeValue(row.calleeTransactionName),
+        transactionCode: this.normalizeValue(row.calleeTransactionCode),
+        interfaceName: this.normalizeValue(row.calleeInterfaceName)
+      };
+    },
+    describeConflict(left, right) {
+      const sameParts = [];
+      const diffParts = [];
+      if (left.transactionName === right.transactionName) {
+        sameParts.push(`交易名称相同【${left.transactionName}】`);
+      } else {
+        diffParts.push(`交易名称不一致【${left.transactionName}】/【${right.transactionName}】`);
+      }
+      if (left.transactionCode === right.transactionCode) {
+        sameParts.push(`交易码相同【${left.transactionCode}】`);
+      } else {
+        diffParts.push(`交易码不一致【${left.transactionCode}】/【${right.transactionCode}】`);
+      }
+      if (left.interfaceName === right.interfaceName) {
+        sameParts.push(`接口名称相同【${left.interfaceName}】`);
+      } else {
+        diffParts.push(`接口名称不一致【${left.interfaceName}】/【${right.interfaceName}】`);
+      }
+      return `第 ${left.rowNumber} 行(${left.side}) 与 第 ${right.rowNumber} 行(${right.side}) 冲突：${sameParts.concat(diffParts).join('，')}`;
+    },
     detectConflicts() {
       const conflicts = [];
-      const initiatorMap = new Map();
-      const calleeMap = new Map();
-      const conflictIndices = new Set();
-      this.rows.forEach((row, index) => {
-        const initiatorKey = `${row.initiatorTransactionCode}|${row.initiatorTransactionName}|${row.interfaceName}`;
-        if (initiatorMap.has(initiatorKey)) {
-          const existing = initiatorMap.get(initiatorKey);
-          conflicts.push({
-            type: '发起交易组冲突',
-            rowNumbers: [existing, index + 2],
-            details: `交易码【${row.initiatorTransactionCode}】交易名称【${row.initiatorTransactionName}】接口【${row.interfaceName}】`
-          });
-          conflictIndices.add(existing - 2);
-          conflictIndices.add(index);
-        } else {
-          initiatorMap.set(initiatorKey, index + 2);
-        }
-        const calleeKey = `${row.calleeTransactionCode}|${row.calleeTransactionName}|${row.calleeInterfaceName}`;
-        if (calleeMap.has(calleeKey)) {
-          const existing = calleeMap.get(calleeKey);
-          conflicts.push({
-            type: '被调用接口组冲突',
-            rowNumbers: [existing, index + 2],
-            details: `交易码【${row.calleeTransactionCode}】交易名称【${row.calleeTransactionName}】接口【${row.calleeInterfaceName}】`
-          });
-          conflictIndices.add(existing - 2);
-          conflictIndices.add(index);
-        } else {
-          calleeMap.set(calleeKey, index + 2);
-        }
+      const conflictRowIndices = new Set();
+      const entities = [];
+      this.rows.forEach((row, rowIndex) => {
+        entities.push(this.buildConflictEntity(row, rowIndex, 'initiator'));
+        entities.push(this.buildConflictEntity(row, rowIndex, 'callee'));
       });
+      const seenPairs = new Set();
+      for (let i = 0; i < entities.length; i++) {
+        for (let j = i + 1; j < entities.length; j++) {
+          const left = entities[i];
+          const right = entities[j];
+          const pairKey = [
+            `${left.rowNumber}-${left.side}`,
+            `${right.rowNumber}-${right.side}`
+          ].join('|');
+          if (seenPairs.has(pairKey)) {
+            continue;
+          }
+          seenPairs.add(pairKey);
+          const sameCount =
+            (left.transactionName === right.transactionName ? 1 : 0) +
+            (left.transactionCode === right.transactionCode ? 1 : 0) +
+            (left.interfaceName === right.interfaceName ? 1 : 0);
+          if (sameCount === 3 || sameCount === 0) {
+            continue;
+          }
+          conflicts.push({
+            type: '三要素冲突',
+            rowNumbers: [left.rowNumber, right.rowNumber],
+            details: this.describeConflict(left, right)
+          });
+          conflictRowIndices.add(left.rowIndex);
+          conflictRowIndices.add(right.rowIndex);
+        }
+      }
       this.conflicts = conflicts;
-      this.conflictRowIndices = Array.from(conflictIndices);
+      this.conflictRowIndices = Array.from(conflictRowIndices);
       this.hasConflict = conflicts.length > 0;
     },
     validateRequired() {
@@ -242,7 +324,7 @@ export default {
     buildCypher(row) {
       const params = {
         sceneName: row.sceneName,
-        sceneOrder: row.sceneOrder || null,
+        sceneOrder: row.sceneOrder && row.sceneOrder.toString().trim() !== '' ? row.sceneOrder : null,
         initiatorSystemName: row.initiatorSystemName,
         initiatorTransactionName: row.initiatorTransactionName,
         initiatorTransactionCode: row.initiatorTransactionCode,
@@ -255,16 +337,17 @@ export default {
         calleeRuleName: row.calleeRuleName || null,
         calleeRuleContent: row.calleeRuleContent || null,
         calleeInterfaceName: row.calleeInterfaceName,
-        calleeOrder: row.calleeOrder || null,
-        callCondition: row.callCondition || null
+        calleeOrder: row.calleeOrder && row.calleeOrder.toString().trim() !== '' ? row.calleeOrder : null,
+        callCondition: row.callCondition && row.callCondition.toString().trim() !== '' ? row.callCondition : null
       };
       let cypher = '';
       const hasInitiatorRule = row.initiatorRuleName && row.initiatorRuleName.toString().trim() !== '';
       const hasCalleeRule = row.calleeRuleName && row.calleeRuleName.toString().trim() !== '';
-      const interfaceInputFields = this.splitFields(row.interfaceInputFieldName);
-      const interfaceOutputFields = this.splitFields(row.interfaceOutputFieldName);
-      const calleeInputFields = this.splitFields(row.calleeInputFieldName);
-      const calleeOutputFields = this.splitFields(row.calleeOutputFieldName);
+      const escapeCypherString = (value) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const interfaceInputFields = this.splitFields(row.interfaceInputFieldName).map(escapeCypherString);
+      const interfaceOutputFields = this.splitFields(row.interfaceOutputFieldName).map(escapeCypherString);
+      const calleeInputFields = this.splitFields(row.calleeInputFieldName).map(escapeCypherString);
+      const calleeOutputFields = this.splitFields(row.calleeOutputFieldName).map(escapeCypherString);
       cypher += `MERGE (scene:场景名称 {name: $sceneName})\n`;
       cypher += `MERGE (initiatorSys:系统名称 {name: $initiatorSystemName})\n`;
       cypher += `MERGE (initiatorTx:交易名称 {name: $initiatorTransactionName})\n`;
@@ -282,7 +365,10 @@ export default {
         cypher += `MERGE (ifaceOutputField${idx}:接口回参字段名称 {name: '${fieldName}'})\n`;
         cypher += `MERGE (iface)-[:包含]->(ifaceOutputField${idx})\n`;
       });
-      cypher += `MERGE (scene)-[:包含 {senaorder: $sceneOrder}]->(initiatorTx)\n`;
+      cypher += `MERGE (scene)-[sceneToInitiator:包含]->(initiatorTx)\n`;
+      if (params.sceneOrder !== null) {
+        cypher += `SET sceneToInitiator.senaorder = $sceneOrder\n`;
+      }
       cypher += `MERGE (initiatorSys)-[:包含]->(initiatorTx)\n`;
       if (hasInitiatorRule) {
         cypher += `MERGE (initiatorTx)-[:包含]->(initiatorRule)\n`;
@@ -294,8 +380,6 @@ export default {
       cypher += `MERGE (calleeTx:交易名称 {name: $calleeTransactionName})\n`;
       cypher += `SET calleeTx.interfaceCode = $calleeTransactionCode\n`;
       cypher += `MERGE (calleeIface:接口名称 {name: $calleeInterfaceName})\n`;
-      cypher += `SET calleeIface.order = $calleeOrder\n`;
-      cypher += `SET calleeIface.callCondition = $callCondition\n`;
       if (hasCalleeRule) {
         cypher += `MERGE (calleeRule:规则 {name: $calleeRuleName})\n`;
         cypher += `SET calleeRule.transRule = $calleeRuleContent\n`;
@@ -315,7 +399,13 @@ export default {
       } else {
         cypher += `MERGE (calleeTx)-[:包含]->(calleeIface)\n`;
       }
-      cypher += `MERGE (initiatorTx)-[:调用 {order: $calleeOrder, callCondition: $callCondition}]->(calleeIface)\n`;
+      cypher += `MERGE (initiatorTx)-[initiatorToCallee:调用]->(calleeIface)\n`;
+      if (params.calleeOrder !== null) {
+        cypher += `SET initiatorToCallee.order = $calleeOrder\n`;
+      }
+      if (params.callCondition !== null) {
+        cypher += `SET initiatorToCallee.callCondition = $callCondition\n`;
+      }
       return { cypher, params };
     }
   }

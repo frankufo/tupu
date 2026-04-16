@@ -1,21 +1,24 @@
 
 <template>
-  <div>
+<div>
+  <!-- 控制栏：所有元素放在同一行 -->
+  <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
     <ExcelImporter @importFinished="renderGraph" />
-    <label style="margin-right: 10px;">请选择知识图谱范围：</label>
-    <select v-model="selectedSystem" @change="renderGraph" :disabled="graphMode === 'TRANSACTION_DETAIL'" style="margin-bottom: 5px;width: 150px">
+    
+    <label style="margin-right: 5px;">请选择知识图谱范围：</label>
+    <select v-model="selectedSystem" @change="renderGraph" :disabled="graphMode === 'TRANSACTION_DETAIL'" style="width: 150px">
       <option value="ALL">全部</option>
       <option v-for="name in systemNames" :key="name" :value="name">
         {{ name }}
       </option>
     </select>
     <button v-if="graphMode === 'TRANSACTION_DETAIL'"
-            @click="backToOverview"
-            style="margin-bottom: 6px;">
+            @click="backToOverview">
       返回总览
     </button>
-
-    <div id="viz" style="height: 570px;background-color: black;"></div>
+    <button @click="handleLogout" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: auto;">退出登录</button>
+  </div>
+  <div id="viz" style="height: calc(100vh - 120px); background-color: black;"></div>
     <!-- 弹框 -->
     <div
         ref="dialog"
@@ -116,8 +119,11 @@
         <button @click="confirmDeleteNode" style="margin-left: 10px; color: red;">删除节点</button>
       </div>
     </div>
-    <NodeEditor @nodeCreated="renderGraph" />
-    <RelationEditor @nodeCreated="renderGraph" />
+    <div style="margin-top: 5px; border-top: 5px solid #ccc; padding-top: 10px;">
+        <NodeEditor @nodeCreated="renderGraph" />
+        <RelationEditor @nodeCreated="renderGraph" />
+    </div>
+
 
 
 
@@ -189,6 +195,10 @@ export default {
       this.focusNodeId = null;
       this.focusNodeName = '';
       this.renderGraph();
+    },
+    handleLogout() {
+      localStorage.removeItem('isLoggedIn');
+      window.location.reload();
     },
 
 

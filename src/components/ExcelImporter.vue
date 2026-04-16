@@ -1,12 +1,9 @@
 <template>
   <div style="margin: 10px 0;">
     <input type="file" accept=".xls,.xlsx" @change="handleFile" />
-    <button @click="showPreview" :disabled="!rows.length">
-      预览数据
-    </button>
     
-    <!-- 预览区域 -->
-    <div v-if="previewHeaders.length" style="margin-top: 10px;">
+    <!-- 冲突和必填校验提示 -->
+    <div v-if="rows.length" style="margin-top: 10px;">
       <!-- 冲突提示 -->
       <div v-if="hasConflict" style="color: red; margin-bottom: 10px; border: 1px solid red; padding: 10px; background-color: #fff5f5;">
         <strong>⚠️ 检测到冲突 {{ conflicts.length }} 条，以下冲突行将不导入：</strong>
@@ -27,30 +24,8 @@
         </ul>
       </div>
       
-      <!-- 预览表格 -->
-      <div style="max-height: 300px; overflow: auto; margin-bottom: 10px;">
-        <table border="1" style="border-collapse: collapse; width: 100%; font-size: 12px;">
-          <thead>
-            <tr>
-              <th style="background-color: #f0f0f0;">行号</th>
-              <th v-for="col in previewHeaders" :key="col" style="background-color: #f0f0f0;">{{ col }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, idx) in rows" :key="idx"
-                :style="{ 
-                  backgroundColor: getRowBackground(idx),
-                  color: getRowColor(idx)
-                }">
-              <td style="font-weight: bold;">{{ idx + 2 }}</td>
-              <td v-for="col in previewHeaders" :key="col">{{ row[col] }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      
-      <button @click="confirmImport" :disabled="hasConflict || importing">
-        {{ importing ? '导入中...' : '确认导入（非冲突行）' }}
+      <button @click="confirmImport" :disabled="hasConflict || requiredFieldErrors.length > 0 || importing">
+        {{ importing ? '导入中...' : '确认导入' }}
       </button>
       
       <span v-if="importResult" style="margin-left: 10px;">
@@ -86,7 +61,6 @@ export default {
   data() {
     return {
       rows: [],
-      previewHeaders: [],
       conflicts: [],
       conflictRowIndices: [],
       hasConflict: false,
@@ -119,12 +93,14 @@ export default {
         const rawRows = XLSX.utils.sheet_to_json(sheet);
         
         this.rows = this.parseRows(rawRows);
-        this.previewHeaders = excelHeaders;
         this.conflicts = [];
         this.conflictRowIndices = [];
         this.hasConflict = false;
         this.requiredFieldErrors = [];
         this.importResult = '';
+        
+        this.detectConflicts();
+        this.validateRequired();
       };
       reader.readAsBinaryString(file);
     },
@@ -162,18 +138,6 @@ export default {
         });
         return parsed;
       });
-    },
-    getRowBackground(idx) {
-      if (this.conflictRowIndices.includes(idx)) {
-        return '#ffcccc';
-      }
-      return 'white';
-    },
-    getRowColor(idx) {
-      if (this.conflictRowIndices.includes(idx)) {
-        return '#cc0000';
-      }
-      return 'black';
     },
     normalizeValue(value) {
       if (value === null || value === undefined) {
@@ -264,7 +228,6 @@ export default {
     },
     validateRequired() {
       const errors = [];
-      
       this.rows.forEach((row, index) => {
         const missing = requiredFields.filter(field => !row[field] || row[field].toString().trim() === '');
         if (missing.length > 0) {
@@ -281,17 +244,11 @@ export default {
       const index = fieldKeys.indexOf(field);
       return index >= 0 ? excelHeaders[index] : field;
     },
-    showPreview() {
-      if (!this.rows.length) return;
-      
-      this.detectConflicts();
-      this.validateRequired();
-    },
     getValidRows() {
       return this.rows.filter((row, index) => !this.conflictRowIndices.includes(index));
     },
     async confirmImport() {
-      if (this.hasConflict || this.importing) return;
+      if (this.hasConflict || this.requiredFieldErrors.length > 0 || this.importing) return;
       this.importing = true;
       this.importResult = '';
       

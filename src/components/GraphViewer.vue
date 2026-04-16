@@ -373,7 +373,7 @@ export default {
             s,
             {
               relationshipFilter: "包含>",
-              maxLevel: 3
+              maxLevel: 1
             }
           )
           YIELD nodes, relationships
